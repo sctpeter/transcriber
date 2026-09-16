@@ -231,13 +231,23 @@ final class RemoteAsrRefiner: NSObject, SegmentRefiner {
     // MARK: - 协议编解码(见 docs/0003)
 
     private func send(segment seg: PendingSegment, on task: URLSessionWebSocketTask) {
-        let header: [String: Any] = [
+        var header: [String: Any] = [
             "type": "segment",
             "id": seg.id,
             "sample_rate": 16000,
             "format": "pcm_s16le",
             "num_samples": seg.samples.count,
         ]
+        let selected = config.sampling.effectiveSamplers
+        if !selected.isEmpty {
+            header["sampling"] = [
+                "samplers": selected,
+                "temperature": max(0, min(2, config.sampling.temperature)),
+                "top_k": max(0, min(200, config.sampling.topK)),
+                "top_p": max(0, min(1, config.sampling.topP)),
+                "min_p": max(0, min(1, config.sampling.minP)),
+            ]
+        }
         guard let headerData = try? JSONSerialization.data(withJSONObject: header),
             let headerText = String(data: headerData, encoding: .utf8)
         else { return }

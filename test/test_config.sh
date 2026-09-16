@@ -50,6 +50,33 @@ out="$(TRANSCRIBER_CONFIG="$TMP/roundtrip.json" "$BIN" --print-config)"
 check "不存在的文件 roundtrip 读到默认值" "$out" '"windowSize" : 512'
 [[ ! -f "$TMP/roundtrip.json" ]] && echo "  ✅ --print-config 不会创建/污染文件"
 
+echo "== 4) 旧 config.json 没有 remoteAsr.sampling,应回落默认(不覆盖服务器,默认值对齐服务器) =="
+cat > "$TMP/legacy.json" <<'EOF'
+{ "remoteAsr": { "enabled": true, "serverURL": "wss://example:8765/v1/transcribe", "timeoutSeconds": 8 } }
+EOF
+out="$(TRANSCRIBER_CONFIG="$TMP/legacy.json" "$BIN" --print-config)"
+check "旧配置其他字段保留" "$out" '"serverURL" : "wss:\/\/example:8765\/v1\/transcribe"'
+check "sampling.samplers 默认空(不覆盖)" "$out" '"samplers" : ['
+check "sampling.temperature 默认 0" "$out" '"temperature" : 0'
+check "sampling.topK 默认 40" "$out" '"topK" : 40'
+
+echo "== 5) remoteAsr.sampling 完整写入并读回(--print-config 与 ConfigStore.save 同一编码器) =="
+cat > "$TMP/sampling.json" <<'EOF'
+{ "remoteAsr": { "sampling": { "samplers": ["top_k", "min_p", "temperature"],
+  "temperature": 0.25, "topK": 17, "topP": 0.5, "minP": 0.125 } } }
+EOF
+first="$(TRANSCRIBER_CONFIG="$TMP/sampling.json" "$BIN" --print-config | tail -n +2)"
+echo "$first" > "$TMP/saved.json"
+second="$(TRANSCRIBER_CONFIG="$TMP/saved.json" "$BIN" --print-config | tail -n +2)"
+for needle in '"top_k"' '"min_p"' '"temperature" : 0.25' '"topK" : 17' '"topP" : 0.5' '"minP" : 0.125'; do
+    check "写出后读回包含 $needle" "$second" "$needle"
+done
+if [[ "$first" == "$second" ]]; then
+    check "两次编码结果完全一致" "ok" "ok"
+else
+    check "两次编码结果完全一致" "diff" "ok"
+fi
+
 echo
 echo "结果: $pass 通过, $fail 失败"
 [[ $fail -eq 0 ]]

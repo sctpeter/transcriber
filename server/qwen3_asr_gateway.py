@@ -4,8 +4,9 @@
 职责划分(见 docs/0003_remote_qwen3_asr_protocol.md):
   - 这个进程只负责"内网可达的 TLS(默认单向,--ca 可选升级成双向 mTLS)+
     WebSocket 面",不自己跑模型推理。
-  - 真正的 ASR 推理交给 llama.cpp 的 llama-server(它本来就有 OpenAI 兼容的
-    /v1/audio/transcriptions 端点,Qwen3-ASR-1.7B-GGUF 官方就是这么跑的),
+  - 真正的 ASR 推理交给 llama.cpp 的 llama-server(OpenAI 兼容的
+    /v1/chat/completions 端点 + input_audio,与 /v1/audio/transcriptions 的内部
+    改写逐字等价,但能逐请求传数值型采样参数,见 docs/0006),
     llama-server 只监听 127.0.0.1,不直接暴露给客户端——这样 mTLS 终止和模型服务
     分开,换模型/升级 llama.cpp 不用碰这层网关代码。
 
@@ -16,6 +17,8 @@
 
 协议:每个 WebSocket 连接上,客户端逐段发送
   1. 一条 TEXT 帧: {"type":"segment","id":N,"sample_rate":16000,"format":"pcm_s16le","num_samples":M}
+     可选 "sampling":{"samplers":[...],"temperature":..,"top_k":..,"top_p":..,"min_p":..}
+     (缺省 = 用 llama-server 默认采样;见 parse_sampling)
   2. 紧跟一条 BINARY 帧:M 个 int16 little-endian 采样
 服务端处理完回一条 TEXT 帧:
   {"type":"result","id":N,"text":"..."} 或 {"type":"error","id":N,"message":"..."}
@@ -24,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import io
 import json
 import logging
@@ -46,8 +50,8 @@ def pcm16_to_wav_bytes(pcm: bytes, sample_rate: int) -> bytes:
 
 
 def extract_asr_text(raw: str) -> str:
-    """llama-server 对 Qwen3-ASR-1.7B-GGUF 的 /v1/audio/transcriptions 响应里,
-    `text` 字段不是纯转写文本,而是 `language <lang><asr_text><转写内容>` 这种带标记
+    """llama-server 对 Qwen3-ASR-1.7B-GGUF 的转写响应里(transcriptions 的 `text`
+    与 chat/completions 的 `message.content` 相同),内容不是纯转写文本,而是 `language <lang><asr_text><转写内容>` 这种带标记
     的原始模型输出(2026-09-16 用 llama.cpp b10991 实测确认,不是文档行为,后续升级
     llama.cpp 需要重新验证这个格式)。这里只取 `<asr_text>` 之后的部分。
     """
@@ -58,8 +62,48 @@ def extract_asr_text(raw: str) -> str:
     return raw[idx + len(marker) :].strip()
 
 
+# llama.cpp common_chat_get_asr_prompt() 给非 LFM2 模板的固定 user 提示词。
+# /v1/audio/transcriptions 内部就是把请求改写成 "这段文本 + 音频标记" 的 chat completion,
+# 这里用 text + input_audio 两个 content part 拼出逐字相同的 prompt(b10991 源码 + 实测确认)。
+ASR_USER_PROMPT = "Transcribe audio to text"
+
+
+def build_chat_request(
+    wav_bytes: bytes, model_name: str, sampling: dict[str, object] | None
+) -> dict[str, object]:
+    """构造发给 /v1/chat/completions 的 JSON body。
+
+    为什么不用 /v1/audio/transcriptions:b10991 的 multipart 表单字段一律是字符串,
+    该端点只把 temperature/max_tokens 转回数字,top_k 等会 400
+    (`type must be number, but is string`)。JSON body 里数值类型原生保留。
+    """
+    body: dict[str, object] = {
+        "model": model_name,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": ASR_USER_PROMPT},
+                    {
+                        "type": "input_audio",
+                        "input_audio": {
+                            "data": base64.b64encode(wav_bytes).decode("ascii"),
+                            "format": "wav",
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+    if sampling:
+        body["samplers"] = list(sampling["samplers"])
+        for key in sampling["samplers"]:
+            body[key] = sampling[key]
+    return body
+
+
 class Transcriber:
-    """薄封装:把一段 WAV 转发给 llama-server 的 OpenAI 兼容转写端点。
+    """薄封装:把一段 WAV 转发给 llama-server 的 OpenAI 兼容 chat completion 端点。
 
     aiohttp 在方法内部才 import(而不是模块顶层):这样 build_ssl_context 这个
     纯 SSL 配置工具函数可以被 test/remote_asr_mock_server.py 复用,而不用逼着
@@ -69,24 +113,68 @@ class Transcriber:
     def __init__(self, llama_server_url: str, model_name: str, timeout: float):
         import aiohttp
 
-        self.url = llama_server_url.rstrip("/") + "/v1/audio/transcriptions"
+        self.url = llama_server_url.rstrip("/") + "/v1/chat/completions"
         self.model_name = model_name
         self.timeout = aiohttp.ClientTimeout(total=timeout)
 
-    async def transcribe(self, wav_bytes: bytes) -> str:
+    async def transcribe(self, wav_bytes: bytes, sampling: dict[str, object] | None = None) -> str:
         import aiohttp
 
-        form = aiohttp.FormData()
-        form.add_field("model", self.model_name)
-        form.add_field(
-            "file", wav_bytes, filename="segment.wav", content_type="audio/wav"
-        )
+        body = build_chat_request(wav_bytes, self.model_name, sampling)
         async with aiohttp.ClientSession(timeout=self.timeout) as session:
-            async with session.post(self.url, data=form) as resp:
-                resp.raise_for_status()
+            async with session.post(self.url, json=body) as resp:
+                if resp.status >= 400:
+                    # 把 llama-server 的错误原文带回客户端日志,而不是只剩一个状态码
+                    raise RuntimeError(f"llama-server HTTP {resp.status}: {(await resp.text())[:300]}")
                 data = await resp.json()
-        # data["text"] 不是纯转写文本,见 extract_asr_text 的注释
-        return extract_asr_text(data.get("text", ""))
+        content = data["choices"][0]["message"].get("content") or ""
+        # content 不是纯转写文本,见 extract_asr_text 的注释
+        return extract_asr_text(content)
+
+
+def _strict_int(v: object) -> int:
+    # int(20.7) 会静默截断、int(True) 会变 1,这两种都应当视为格式错误
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or int(v) != v:
+        raise ValueError(f"不是整数: {v!r}")
+    return int(v)
+
+
+def parse_sampling(header: dict) -> dict[str, object] | None:
+    """仅接受 App UI 暴露的采样器和值;没有 sampling 字段表示采用 llama-server 默认配置。
+
+    白名单校验不能省:llama-server 对未知采样器名是静默忽略的(实测返回 200),
+    不在这里拒绝的话客户端配错了谁都不会知道。temperature 必须在链里——缺了它
+    llama.cpp 等价于温度 1 随机抽样(客户端 UI 也强制启用它)。
+    """
+    raw = header.get("sampling")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("sampling 必须是对象")
+    allowed = ("top_k", "top_p", "min_p", "temperature")
+    requested = raw.get("samplers")
+    if not isinstance(requested, list) or not requested:
+        raise ValueError("sampling.samplers 必须是非空数组")
+    if len(requested) != len(set(requested)) or not set(requested) <= set(allowed):
+        raise ValueError(f"sampling.samplers 包含不支持或重复的采样器: {requested}")
+    if "temperature" not in requested:
+        raise ValueError("sampling.samplers 必须包含 temperature")
+    selected = [name for name in allowed if name in requested]
+    try:
+        values = {
+            "samplers": selected,
+            "temperature": float(raw["temperature"]),
+            "top_k": _strict_int(raw["top_k"]),
+            "top_p": float(raw["top_p"]),
+            "min_p": float(raw["min_p"]),
+        }
+    except (KeyError, TypeError, ValueError) as e:
+        raise ValueError("采样参数格式无效") from e
+    if not 0 <= values["temperature"] <= 2 or not 0 <= values["top_k"] <= 200:
+        raise ValueError("temperature 或 top_k 超出范围")
+    if not 0 <= values["top_p"] <= 1 or not 0 <= values["min_p"] <= 1:
+        raise ValueError("top_p 或 min_p 超出范围")
+    return values
 
 
 async def handle_connection(ws, transcriber: Transcriber):
@@ -120,7 +208,7 @@ async def handle_connection(ws, transcriber: Transcriber):
                 )
             try:
                 wav_bytes = pcm16_to_wav_bytes(message, sample_rate)
-                text = await transcriber.transcribe(wav_bytes)
+                text = await transcriber.transcribe(wav_bytes, parse_sampling(header))
                 await ws.send(json.dumps({"type": "result", "id": seg_id, "text": text}))
             except Exception as e:  # noqa: BLE001 - 单个 segment 出错不能拖垮整条连接
                 log.exception("segment %s 转写失败", seg_id)

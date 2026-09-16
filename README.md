@@ -66,6 +66,21 @@ App 当前为支持私有 CA 的 WSS 服务设置了 `NSAllowsArbitraryLoads`，
 自身** 的 ATS 附加限制；这不会影响系统或其他 App。远程端点仍必须使用 `wss://`，并通过
 应用内私有 CA 校验。排查经过见 [docs/0004_remote_asr_ats_resolution.md](docs/0004_remote_asr_ats_resolution.md)。
 
+设置页可选“覆盖服务器默认采样器”（top-k / top-p / min-p，温度始终启用）。配置坑：
+
+- **llama-server b10991 的 `/v1/audio/transcriptions` 不能逐请求传 top_k/top_p/min_p。**
+  multipart 表单字段一律是字符串，该端点只把 `temperature`、`max_tokens` 转回数字，其余报
+  `type must be number, but is string`（HTTP 400）。网关因此改走 `/v1/chat/completions` +
+  `input_audio`（prompt 与 transcriptions 端点逐字等价），详见 [docs/0006](docs/0006_remote_qwen_sampling.md)。
+- **llama-server 对未知采样器名静默忽略**（仍返回 200），所以网关必须做白名单校验。
+- 服务器默认温度约 1e-6（近似贪心），App 默认值与之对齐为 0；采样链里不含 temperature 时
+  llama.cpp 等价于温度 1 随机抽样，所以覆盖时强制启用温度。
+- **移动项目目录后要检查 `config.json` 里的证书路径**（如 `remoteAsr.caCertPath`）。它是绝对路径，
+  文件找不到时 App 不报错弹窗，只会一直回退本地精修。
+- **Python 3.13 客户端连网关会报 `Missing Authority Key Identifier`**：3.13 默认启用
+  `VERIFY_X509_STRICT`，`make_remote_asr_certs.sh` 签出的证书不满足；App（macOS SecTrust）不受影响，
+  Python 测试客户端需清掉该 flag（见 `test/remote_gateway_e2e.py`）。
+
 ## 项目模块
 
 ```text
@@ -107,6 +122,9 @@ docs/                             # 设计决策、协议与排查记录
 ./test/test_config.sh       # 默认值、部分配置覆盖与配置隔离
 ./test/test_denoise.sh      # 高通与降噪的降级保护
 ./test/test_remote_asr.sh   # 私有 CA、WSS、远程协议和本地回退
+uv run --with websockets python test/test_gateway_sampling.py  # 网关采样参数校验与请求字段类型
+./test/test_remote_sampling_live.sh  # 真实远端：新网关代码直连 llama-server（不动已部署服务）
+uv run --with websockets python test/remote_gateway_e2e.py <wss_url> certs/ca/ca.crt <16k.wav>  # 部署后端到端
 ```
 
 完整的配置设计、降噪取舍和远程协议分别见 `docs/0001`、`docs/0002`、`docs/0003`。

@@ -139,6 +139,41 @@ struct TranscriberConfig: Codable, Equatable {
     }
 
     struct RemoteAsr: Codable, Equatable {
+        struct Sampling: Codable, Equatable {
+            /// 固定执行顺序;temperature 在覆盖时强制启用(见 effectiveSamplers)
+            static let order = ["top_k", "top_p", "min_p", "temperature"]
+
+            /// 空数组 = 不覆盖服务器默认采样器。非空时按固定顺序组合为 llama-server 的 samplers。
+            var samplers: [String] = []
+            // 默认值对齐 wangtian03 上 llama-server 的实际默认(/props,2026-09-16):
+            // 服务器 temperature≈1e-6,这里取 0,实测两者输出一致(都近似贪心)。
+            var temperature: Float = 0
+            var topK: Int = 40
+            var topP: Float = 0.95
+            var minP: Float = 0.05
+
+            init() {}
+
+            /// 实际发送的采样器链:按固定顺序去重,覆盖启用时总是包含 temperature。
+            /// 不含 temperature 时 llama.cpp 等价于温度 1 随机抽样,会让识别结果明显不稳定,
+            /// 所以即使旧 config.json 里漏了它也在这里补上。
+            var effectiveSamplers: [String] {
+                guard !samplers.isEmpty else { return [] }
+                return Self.order.filter { $0 == "temperature" || samplers.contains($0) }
+            }
+
+            private enum CodingKeys: String, CodingKey { case samplers, temperature, topK, topP, minP }
+
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                samplers = try c.decodeIfPresent([String].self, forKey: .samplers) ?? Self().samplers
+                temperature = try c.decodeIfPresent(Float.self, forKey: .temperature) ?? Self().temperature
+                topK = try c.decodeIfPresent(Int.self, forKey: .topK) ?? Self().topK
+                topP = try c.decodeIfPresent(Float.self, forKey: .topP) ?? Self().topP
+                minP = try c.decodeIfPresent(Float.self, forKey: .minP) ?? Self().minP
+            }
+        }
+
         /// 精修(final)是否走远程 Qwen3-ASR,而不是本地 paraformer-large。
         /// partial 永远走本地流式模型,不受此项影响(见 docs/0003)。
         var enabled: Bool = false
@@ -156,12 +191,14 @@ struct TranscriberConfig: Codable, Equatable {
         var caCertPath: String = ""
         /// 请求超时(秒),超时按本地 paraformer-large 兜底(不阻塞转写)
         var timeoutSeconds: Float = 8.0
+        /// 远程 llama-server 的逐段采样设置；空采样器列表表示使用服务器默认值。
+        var sampling = Sampling()
 
         init() {}
 
         private enum CodingKeys: String, CodingKey {
             case enabled, serverURL, clientIdentityPath, clientIdentityPassword, caCertPath,
-                timeoutSeconds
+                timeoutSeconds, sampling
         }
 
         init(from decoder: Decoder) throws {
@@ -177,6 +214,7 @@ struct TranscriberConfig: Codable, Equatable {
             caCertPath = try c.decodeIfPresent(String.self, forKey: .caCertPath) ?? Self().caCertPath
             timeoutSeconds =
                 try c.decodeIfPresent(Float.self, forKey: .timeoutSeconds) ?? Self().timeoutSeconds
+            sampling = try c.decodeIfPresent(Sampling.self, forKey: .sampling) ?? Sampling()
         }
     }
 

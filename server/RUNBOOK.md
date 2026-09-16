@@ -155,8 +155,8 @@ scp certs/server/server.crt certs/server/server.key certs/ca/ca.crt \
 scp server/qwen3_asr_gateway.py server/requirements.txt wangtian03:~/transcriber_server/
 ```
 
-**踩坑**:llama-server 的 `/v1/audio/transcriptions` 响应不是纯 OpenAI 格式,`text`
-字段实测(llama.cpp b10991 + Qwen3-ASR-1.7B-GGUF)是
+**踩坑**:llama-server 的转写输出不是纯文本(网关现走 `/v1/chat/completions`,见 docs/0006;
+`/v1/audio/transcriptions` 的 `text` 与 chat 的 `message.content` 内容相同),实测(llama.cpp b10991 + Qwen3-ASR-1.7B-GGUF)是
 `"language English<asr_text>实际转写内容"` 这种带标记的原始模型输出,不是纯文本。
 `qwen3_asr_gateway.py` 里的 `extract_asr_text()` 专门处理这个(见该函数注释,升级
 llama.cpp 版本后需要重新用真实音频验证这个格式有没有变)。
