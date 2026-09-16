@@ -2,6 +2,10 @@ import CSherpaOnnx
 
 /// swift-api-examples/SherpaOnnx.swift
 /// Copyright (c)  2023  Xiaomi Corporation
+///
+/// Licensed under the Apache License, Version 2.0 (see LICENSES/Apache-2.0.txt).
+/// Modified for Transcriber: added `import CSherpaOnnx`; removed upstream APIs after
+/// line 1014 of sherpa-onnx v1.13.3 (TTS etc., unused here). See THIRD_PARTY_NOTICES.md.
 
 import Foundation  // For NSString
 

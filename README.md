@@ -128,3 +128,7 @@ uv run --with websockets python test/remote_gateway_e2e.py <wss_url> certs/ca/ca
 ```
 
 完整的配置设计、降噪取舍和远程协议分别见 `docs/0001`、`docs/0002`、`docs/0003`。
+
+## 许可证
+
+本项目以 [MIT License](LICENSE) 发布。`Sources/Transcriber/ASR/SherpaOnnx.swift` 源自 sherpa-onnx（Apache-2.0），第三方依赖说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
