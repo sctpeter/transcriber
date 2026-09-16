@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleExecutable</key>
+	<string>Transcriber</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.transcriber</string>
+	<key>CFBundleName</key>
+	<string>Transcriber</string>
+	<key>CFBundleDisplayName</key>
+	<string>实时转写</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<!--
+		远程 ASR 使用私有 CA 做显式 pinning（RemoteAsrRefiner）。ATS 会在该校验
+		通过后继续施加系统根信任/TLS 策略，并导致 GUI URLSession 报 -1200；故这里
+		关闭 ATS，让连接的信任边界仅由私有 CA pinning 决定。2026-09-16 已通过
+		同一 GUI App 的 ATS A/B 实验验证。
+	-->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>录制麦克风声音用于实时语音转文字。</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>捕获系统播放的声音(如网课、会议)用于实时语音转文字。</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>连接你自己部署的远程 Qwen3-ASR 转写服务器,用于提升识别准确率。</string>
+</dict>
+</plist>

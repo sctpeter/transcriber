@@ -1,0 +1,11 @@
+.build/
+build/
+third_party/
+.DS_Store
+.swiftpm/
+.env
+.claude/
+# make_remote_asr_certs.sh 的生成产物，包含私钥和证书；保留 certs/ 下的生成脚本。
+certs/ca/
+certs/server/
+certs/client/

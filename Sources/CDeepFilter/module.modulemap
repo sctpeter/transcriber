@@ -1,0 +1,4 @@
+module CDeepFilter {
+    header "../../third_party/deepfilternet/include/deep_filter/deep_filter.h"
+    export *
+}
