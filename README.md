@@ -77,6 +77,8 @@ App 当前为支持私有 CA 的 WSS 服务设置了 `NSAllowsArbitraryLoads`，
   llama.cpp 等价于温度 1 随机抽样，所以覆盖时强制启用温度。
 - **移动项目目录后要检查 `config.json` 里的证书路径**（如 `remoteAsr.caCertPath`）。它是绝对路径，
   文件找不到时 App 不报错弹窗，只会一直回退本地精修。
+- **本地 paraformer 只支持 `greedy_search`。** 传 `modified_beam_search` 时 sherpa-onnx 会在 C++ 里
+  `exit(-1)`，App 表现为点“开始转写”就消失、没有崩溃报告（退出码 255）。该选项已移除，见 docs/0007。
 - **Python 3.13 客户端连网关会报 `Missing Authority Key Identifier`**：3.13 默认启用
   `VERIFY_X509_STRICT`，`make_remote_asr_certs.sh` 签出的证书不满足；App（macOS SecTrust）不受影响，
   Python 测试客户端需清掉该 flag（见 `test/remote_gateway_e2e.py`）。
@@ -120,6 +122,7 @@ docs/                             # 设计决策、协议与排查记录
 
 ```bash
 ./test/test_config.sh       # 默认值、部分配置覆盖与配置隔离
+./test/test_decoding_greedy.sh  # 旧配置含 modified_beam_search 不再闪退
 ./test/test_denoise.sh      # 高通与降噪的降级保护
 ./test/test_remote_asr.sh   # 私有 CA、WSS、远程协议和本地回退
 uv run --with websockets python test/test_gateway_sampling.py  # 网关采样参数校验与请求字段类型

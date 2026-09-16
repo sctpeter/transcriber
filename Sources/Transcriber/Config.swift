@@ -45,21 +45,20 @@ struct TranscriberConfig: Codable, Equatable {
         var numThreads: Int = 2
         /// 推理执行后端,当前预编译库只含 cpu
         var provider: String = "cpu"
-        /// 解码策略:greedy_search(默认,最快)或 modified_beam_search
-        var decodingMethod: String = "greedy_search"
+        // 不再提供 decodingMethod:本地流式/离线模型都是 paraformer(非自回归),sherpa-onnx
+        // 只支持 greedy_search;设成 modified_beam_search 会在 C++ 里直接 exit(-1) 闪退
+        // (见 docs/0007)。旧 config.json 里残留的该字段解码时被忽略,下次保存即清除。
 
         init() {}
 
         private enum CodingKeys: String, CodingKey {
-            case numThreads, provider, decodingMethod
+            case numThreads, provider
         }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             numThreads = try c.decodeIfPresent(Int.self, forKey: .numThreads) ?? Self().numThreads
             provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? Self().provider
-            decodingMethod =
-                try c.decodeIfPresent(String.self, forKey: .decodingMethod) ?? Self().decodingMethod
         }
     }
 

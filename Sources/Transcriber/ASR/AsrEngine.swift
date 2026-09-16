@@ -60,7 +60,7 @@ final class AsrEngine {
                 provider: config.asr.provider
             ),
             enableEndpoint: false,  // endpoint 由 VAD 负责
-            decodingMethod: config.asr.decodingMethod
+            decodingMethod: "greedy_search"  // paraformer 仅支持 greedy_search,见 docs/0007
         )
         online = SherpaOnnxRecognizer(config: &onlineConfig)
     }
@@ -172,7 +172,7 @@ final class OfflineRefiner: SegmentRefiner {
                 provider: config.asr.provider,
                 modelType: "paraformer"
             ),
-            decodingMethod: config.asr.decodingMethod
+            decodingMethod: "greedy_search"  // paraformer 仅支持 greedy_search,见 docs/0007
         )
         recognizer = SherpaOnnxOfflineRecognizer(config: &recognizerConfig)
     }

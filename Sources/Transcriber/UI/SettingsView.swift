@@ -33,14 +33,10 @@ struct SettingsView: View {
 
             Section("本地识别性能（sherpa-onnx）") {
                 Stepper("线程数:\(config.asr.numThreads)", value: $config.asr.numThreads, in: 1...8)
-                Picker("解码策略", selection: $config.asr.decodingMethod) {
-                    Text("greedy_search(默认,最快)").tag("greedy_search")
-                    Text("modified_beam_search").tag("modified_beam_search")
-                }
                 Text("仅影响本地实时预览和本地 final 精修，不影响远程 Qwen3-ASR。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                Text("推理后端:cpu(当前预编译库仅含 CPU)")
+                Text("推理后端:cpu(当前预编译库仅含 CPU);解码:greedy_search(paraformer 仅支持此项)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

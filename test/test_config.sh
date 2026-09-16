@@ -32,7 +32,11 @@ check "vad.maxSpeechDuration 默认 28" "$out" '"maxSpeechDuration" : 28'
 check "vad.windowSize 默认 512" "$out" '"windowSize" : 512'
 check "asr.numThreads 默认 2" "$out" '"numThreads" : 2'
 check "asr.provider 默认 cpu" "$out" '"provider" : "cpu"'
-check "asr.decodingMethod 默认 greedy_search" "$out" '"decodingMethod" : "greedy_search"'
+if echo "$out" | grep -q decodingMethod; then
+    check "asr.decodingMethod 已移除(paraformer 只支持 greedy)" "present" "absent"
+else
+    check "asr.decodingMethod 已移除(paraformer 只支持 greedy)" "absent" "absent"
+fi
 
 echo "== 2) 只写部分字段的 JSON,未写的字段应回落默认值(而不是报错/清零) =="
 cat > "$TMP/partial.json" <<'EOF'
@@ -42,7 +46,7 @@ out="$(TRANSCRIBER_CONFIG="$TMP/partial.json" "$BIN" --print-config)"
 check "覆盖字段生效:minSilenceDuration=1.5" "$out" '"minSilenceDuration" : 1.5'
 check "覆盖字段生效:numThreads=4" "$out" '"numThreads" : 4'
 check "未覆盖字段仍是默认:threshold=0.5" "$out" '"threshold" : 0.5'
-check "未覆盖字段仍是默认:decodingMethod=greedy_search" "$out" '"decodingMethod" : "greedy_search"'
+check "未覆盖字段仍是默认:provider=cpu" "$out" '"provider" : "cpu"'
 
 echo "== 3) 保存后能读回同样的值(SettingsView 用的 ConfigStore.save 路径) =="
 "$BIN" --print-config >/dev/null  # 确保上一步没有把默认 config.json 写脏(--print-config 只读不写)
