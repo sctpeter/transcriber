@@ -14,10 +14,19 @@ module.exports = {
         "--port", "8080",
         // 默认 n_ctx_slot=65536 (从模型元数据读的) * n_slots=4 = 262144 token 的 KV
         // cache,实测吃了 ~9GB RAM(这台机器总共 15GB)。Transcriber 这边单句最长
-        // 28s(AsrEngine.VAD.maxSpeechDuration),用不到这么大 context,4096*2 足够
+        // 28s(AsrEngine.VAD.maxSpeechDuration),用不到这么大 context,4096 足够
         // 留大量余量,把内存占用压到 ~1GB 量级。
+        // parallel=1:只有一个客户端,且网关 handle_connection() 在同一连接上逐段
+        // await,请求到 llama-server 本来就是严格串行的,第二个 slot 永远空闲。
         "--ctx-size", "4096",
-        "--parallel", "2",
+        "--parallel", "1",
+        // 关闭内存里的 prompt cache(默认上限 8192 MiB):每个请求只有模板 +
+        // "Transcribe audio to text" 这几十个 token 相同,音频每句都不同,快照几乎
+        // 复用不上;而每份快照都带整句音频的 KV,会让内存持续上涨(Linux 上该上限
+        // 对多模态请求可能失效,见 llama.cpp issue #22629)。slot 自己的 KV cache
+        // 不受影响。注意:启动日志仍会打印 "prompt cache is enabled, size limit:
+        // 8192 MiB",这是已知的日志 bug(issue #22127),缓存实际已关闭。
+        "--cache-ram", "0",
       ],
       env: { LD_LIBRARY_PATH: "." },
       autorestart: true,

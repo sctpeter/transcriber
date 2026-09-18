@@ -184,6 +184,10 @@ echo "export PATH=\$HOME/.npm-global/bin:\$PATH" >> ~/.zshrc
   `n_parallel`(4)= 262144 token 的 KV cache,实测吃了 **9.4GB 内存**(这台机器只有
   15GB,压力很大)。Transcriber 单句最长 28 秒(`AsrEngine.VAD.maxSpeechDuration`),
   用不到这么大 context,加上 `--ctx-size 4096 --parallel 2` 后降到 **2.9GB**。
+  之后改为 `--parallel 1`:只有一个客户端,网关在同一连接上逐段串行转发,第二个
+  slot 从来用不上。同时加 `--cache-ram 0` 关掉内存 prompt cache(默认最多吃
+  8192 MiB):转写请求之间只有几十个 token 的前缀相同,缓存没有收益,反而让内存
+  随使用持续上涨。关闭后启动日志仍显示 "prompt cache is enabled",是已知日志 bug。
 
 ```bash
 scp server/ecosystem.config.js wangtian03:~/transcriber_server/
